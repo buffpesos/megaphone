@@ -129,11 +129,41 @@ The two stages have different jobs: SpeechAnalyzer turns audio into words, then 
 ## Building from source
 
 ```bash
-git clone https://github.com/Kuberwastaken/megaphone
+git clone https://github.com/buffpesos/megaphone
 cd megaphone
 make        # requires Xcode 26 and the macOS 26 SDK
 make run
 ```
+
+The build targets `macosx26.0`, so it needs **Xcode 26** — not just the Command Line Tools. Two things can trip up a fresh checkout:
+
+### The compiler can't build the standard library
+
+If `make` fails with something like:
+
+```
+error: failed to build module 'Swift'; this SDK is not supported by the compiler
+```
+
+your `xcrun` is resolving a Command Line Tools SDK that's newer than the CLT compiler. Point the build at Xcode's matched toolchain and SDK, then build:
+
+```bash
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
+make
+```
+
+### Code signing
+
+The Makefile signs with a `Megaphone Dev` identity by default. If you don't have that certificate, ad-hoc sign instead:
+
+```bash
+make CODESIGN_IDENTITY=-
+```
+
+Ad-hoc signing builds and runs fine, but the signature changes on **every** rebuild, so macOS treats each build as a new app and forgets the Accessibility / microphone permissions you granted — which silently breaks the global `Fn` shortcut until you re-grant them.
+
+To avoid re-granting after every rebuild, create a persistent self-signed **code-signing** certificate named `Megaphone Dev` (Keychain Access → Certificate Assistant → *Create a Certificate…* → Identity Type: *Self-Signed Root*, Certificate Type: *Code Signing*), then build with a plain `make`. A stable signature means your granted permissions survive rebuilds.
 
 ## Credits
 
