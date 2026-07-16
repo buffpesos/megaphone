@@ -7,6 +7,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Erase any cloud credential left behind by older builds before doing
+        // anything else. Megaphone is on-device only and never uses it.
+        LegacyCredentialCleanup.purge()
+
         NetworkMonitor.shared.start()
 
         NotificationCenter.default.addObserver(

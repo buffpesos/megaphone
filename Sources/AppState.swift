@@ -217,11 +217,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         case muted(previouslyMuted: Bool)
     }
 
-    private let apiKeyStorageKey = "groq_api_key"
-    private let apiBaseURLStorageKey = "api_base_url"
-    private let postProcessingModelStorageKey = "post_processing_model"
-    private let postProcessingFallbackModelStorageKey = "post_processing_fallback_model"
-    private let contextModelStorageKey = "context_model"
     private let holdShortcutStorageKey = "hold_shortcut"
     private let toggleShortcutStorageKey = "toggle_shortcut"
     private let copyAgainShortcutStorageKey = "copy_again_shortcut"
@@ -238,7 +233,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let instructionExecutionGuardEnabledStorageKey = "instruction_execution_guard_enabled"
     private let customSystemPromptLastModifiedStorageKey = "custom_system_prompt_last_modified"
     private let customContextPromptLastModifiedStorageKey = "custom_context_prompt_last_modified"
-    private let contextScreenshotMaxDimensionStorageKey = "context_screenshot_max_dimension"
     private let shortcutStartDelayStorageKey = "shortcut_start_delay"
     private let preserveClipboardStorageKey = "preserve_clipboard"
     private let preserveExactWordingStorageKey = "preserve_exact_wording"
@@ -261,12 +255,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let pressEnterAfterPasteDelay: TimeInterval = 0.08
     private let clipboardRestoreDelay: TimeInterval = 1.0
     let maxPipelineHistoryCount = 20
-    static let defaultContextScreenshotMaxDimension = Int(AppContextService.defaultScreenshotMaxDimension)
-    static let contextScreenshotDimensionOptions = [1024, 768, 640, 512]
-    static let defaultPostProcessingModel = "openai/gpt-oss-20b"
-    static let defaultPostProcessingFallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
-    static let defaultContextModel = "qwen/qwen3.6-27b"
-    private static let deprecatedDefaultContextModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     private static let trailingPressEnterCommandPattern = try! NSRegularExpression(
         pattern: #"(?i)(?:^|[ \t\r\n,;:\-]+)press[ \t\r\n]+enter[\s\p{P}]*$"#
     )
@@ -274,39 +262,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var hasCompletedSetup: Bool {
         didSet {
             UserDefaults.standard.set(hasCompletedSetup, forKey: "hasCompletedSetup")
-        }
-    }
-
-    @Published var apiKey: String {
-        didSet {
-            persistAPIKey(apiKey)
-            rebuildContextService()
-        }
-    }
-
-    @Published var apiBaseURL: String {
-        didSet {
-            persistAPIBaseURL(apiBaseURL)
-            rebuildContextService()
-        }
-    }
-
-    @Published var postProcessingModel: String {
-        didSet {
-            UserDefaults.standard.set(postProcessingModel, forKey: postProcessingModelStorageKey)
-        }
-    }
-
-    @Published var postProcessingFallbackModel: String {
-        didSet {
-            UserDefaults.standard.set(postProcessingFallbackModel, forKey: postProcessingFallbackModelStorageKey)
-        }
-    }
-
-    @Published var contextModel: String {
-        didSet {
-            UserDefaults.standard.set(contextModel, forKey: contextModelStorageKey)
-            rebuildContextService()
         }
     }
 
@@ -447,17 +402,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 instructionExecutionGuardEnabled,
                 forKey: instructionExecutionGuardEnabledStorageKey
             )
-        }
-    }
-
-    @Published var contextScreenshotMaxDimension: Int {
-        didSet {
-            let normalizedDimension = Self.normalizedContextScreenshotMaxDimension(contextScreenshotMaxDimension)
-            if normalizedDimension != contextScreenshotMaxDimension {
-                contextScreenshotMaxDimension = normalizedDimension
-            }
-            UserDefaults.standard.set(contextScreenshotMaxDimension, forKey: contextScreenshotMaxDimensionStorageKey)
-            rebuildContextService()
         }
     }
 
@@ -653,11 +597,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
     init() {
         UserDefaults.standard.removeObject(forKey: "force_http2_transcription")
         let hasCompletedSetup = UserDefaults.standard.bool(forKey: "hasCompletedSetup")
-        let apiKey = Self.loadStoredAPIKey(account: apiKeyStorageKey)
-        let apiBaseURL = Self.loadStoredAPIBaseURL(account: "api_base_url")
-        let postProcessingModel = UserDefaults.standard.string(forKey: postProcessingModelStorageKey) ?? Self.defaultPostProcessingModel
-        let postProcessingFallbackModel = UserDefaults.standard.string(forKey: postProcessingFallbackModelStorageKey) ?? Self.defaultPostProcessingFallbackModel
-        let contextModel = Self.loadStoredContextModel(key: contextModelStorageKey)
         let shortcuts = Self.loadShortcutConfiguration(
             holdKey: holdShortcutStorageKey,
             toggleKey: toggleShortcutStorageKey,
@@ -690,10 +629,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let customSystemPromptLastModified = UserDefaults.standard.string(forKey: customSystemPromptLastModifiedStorageKey) ?? ""
         let customContextPromptLastModified = UserDefaults.standard.string(forKey: customContextPromptLastModifiedStorageKey) ?? ""
         let outputLanguage = UserDefaults.standard.string(forKey: outputLanguageStorageKey) ?? ""
-        let storedContextScreenshotMaxDimension = UserDefaults.standard.object(forKey: contextScreenshotMaxDimensionStorageKey) != nil
-            ? UserDefaults.standard.integer(forKey: contextScreenshotMaxDimensionStorageKey)
-            : Self.defaultContextScreenshotMaxDimension
-        let contextScreenshotMaxDimension = Self.normalizedContextScreenshotMaxDimension(storedContextScreenshotMaxDimension)
         let shortcutStartDelay = max(0, UserDefaults.standard.double(forKey: shortcutStartDelayStorageKey))
         let isCommandModeEnabled = UserDefaults.standard.object(forKey: commandModeEnabledStorageKey) == nil
             ? false
@@ -756,19 +691,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         let selectedMicrophoneID = UserDefaults.standard.string(forKey: selectedMicrophoneStorageKey) ?? "default"
 
-        self.contextService = Self.makeAppContextService(
-            apiKey: apiKey,
-            baseURL: apiBaseURL,
-            customContextPrompt: customContextPrompt,
-            contextModel: contextModel,
-            contextScreenshotMaxDimension: contextScreenshotMaxDimension
-        )
+        self.contextService = AppContextService(customContextPrompt: customContextPrompt)
         self.hasCompletedSetup = hasCompletedSetup
-        self.apiKey = apiKey
-        self.apiBaseURL = apiBaseURL
-        self.postProcessingModel = postProcessingModel
-        self.postProcessingFallbackModel = postProcessingFallbackModel
-        self.contextModel = contextModel
         self.holdShortcut = shortcuts.hold
         self.toggleShortcut = shortcuts.toggle
         self.copyAgainShortcut = shortcuts.copyAgain
@@ -785,7 +709,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.customSystemPrompt = customSystemPrompt
         self.customContextPrompt = customContextPrompt
         self.instructionExecutionGuardEnabled = instructionExecutionGuardEnabled
-        self.contextScreenshotMaxDimension = contextScreenshotMaxDimension
         self.customSystemPromptLastModified = customSystemPromptLastModified
         self.customContextPromptLastModified = customContextPromptLastModified
         self.outputLanguage = outputLanguage
@@ -879,24 +802,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         audioDeviceObservers.removeAll()
     }
 
-    private static func loadStoredAPIKey(account: String) -> String {
-        if let storedKey = AppSettingsStorage.load(account: account), !storedKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return storedKey
-        }
-        return ""
-    }
-
-    private func persistAPIKey(_ value: String) {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            AppSettingsStorage.delete(account: apiKeyStorageKey)
-        } else {
-            AppSettingsStorage.save(trimmed, account: apiKeyStorageKey)
-        }
-    }
-
-    static let defaultAPIBaseURL = "https://api.groq.com/openai/v1"
-
     private struct StoredShortcutConfiguration {
         let hold: ShortcutBinding
         let toggle: ShortcutBinding
@@ -915,27 +820,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let binding: ShortcutBinding?
         let hadStoredValue: Bool
         let didNormalize: Bool
-    }
-
-    private static func loadStoredAPIBaseURL(account: String) -> String {
-        if let stored = AppSettingsStorage.load(account: account), !stored.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return stored
-        }
-        return defaultAPIBaseURL
-    }
-
-    private static func loadStoredContextModel(key: String) -> String {
-        guard let stored = UserDefaults.standard.string(forKey: key) else {
-            return defaultContextModel
-        }
-
-        let trimmed = stored.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed == deprecatedDefaultContextModel {
-            UserDefaults.standard.set(defaultContextModel, forKey: key)
-            return defaultContextModel
-        }
-
-        return trimmed.isEmpty ? defaultContextModel : trimmed
     }
 
     private static func loadShortcutConfiguration(
@@ -991,66 +875,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         )
     }
 
-    static func normalizedContextScreenshotMaxDimension(_ value: Int) -> Int {
-        contextScreenshotDimensionOptions.contains(value)
-            ? value
-            : defaultContextScreenshotMaxDimension
-    }
-
-    static func makeAppContextService(
-        apiKey: String,
-        baseURL: String,
-        customContextPrompt: String,
-        contextModel: String,
-        contextScreenshotMaxDimension: Int
-    ) -> AppContextService {
-        AppContextService(
-            // Megaphone 1.1.1 is local-only. Ignore credentials retained from
-            // older FreeFlow/Megaphone installs so an upgrade can never
-            // silently reactivate screenshot or cloud context inference.
-            apiKey: "",
-            baseURL: baseURL,
-            customContextPrompt: customContextPrompt,
-            contextModel: contextModel,
-            screenshotMaxDimension: CGFloat(normalizedContextScreenshotMaxDimension(contextScreenshotMaxDimension))
-        )
-    }
-
-    func makeAppContextService() -> AppContextService {
-        Self.makeAppContextService(
-            apiKey: apiKey,
-            baseURL: apiBaseURL,
-            customContextPrompt: customContextPrompt,
-            contextModel: contextModel,
-            contextScreenshotMaxDimension: contextScreenshotMaxDimension
-        )
-    }
-
     private func rebuildContextService() {
-        contextService = makeAppContextService()
-    }
-
-    private func persistAPIBaseURL(_ value: String) {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty || trimmed == Self.defaultAPIBaseURL {
-            AppSettingsStorage.delete(account: apiBaseURLStorageKey)
-        } else {
-            AppSettingsStorage.save(trimmed, account: apiBaseURLStorageKey)
-        }
-    }
-
-    private func persistOptionalAPIValue(_ value: String, account: String) {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            AppSettingsStorage.delete(account: account)
-        } else {
-            AppSettingsStorage.save(trimmed, account: account)
-        }
-    }
-
-    private static func loadOptionalStoredAPIValue(account: String) -> String {
-        let stored = AppSettingsStorage.load(account: account) ?? ""
-        return stored.trimmingCharacters(in: .whitespacesAndNewlines)
+        contextService = AppContextService(customContextPrompt: customContextPrompt)
     }
 
     /// Keeps the stored language preference tidy. Values are validated
@@ -2990,7 +2816,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     static func resolvedSystemPrompt(_ customSystemPrompt: String) -> String {
         customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? PostProcessingService.defaultSystemPrompt
+            ? DictationPrompts.defaultSystemPrompt
             : customSystemPrompt
     }
 
