@@ -118,7 +118,7 @@ actor AppleFoundationModelsPostProcessor {
         let started = ContinuousClock.now
         let responseText = try await respond(session: session, prompt: prompt, timeout: timeout)
         let elapsed = started.duration(to: .now).timeInterval
-        let cleaned = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleaned = Self.stripResponseFences(responseText)
         try Self.validate(cleaned, source: request.transcript)
         return SmartCleanupResponse(text: cleaned, prompt: prompt, elapsed: elapsed)
     }
@@ -156,8 +156,9 @@ actor AppleFoundationModelsPostProcessor {
         </command>
         """
         let started = ContinuousClock.now
-        let output = try await respond(session: session, prompt: prompt, timeout: timeout)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let output = Self.stripResponseFences(
+            try await respond(session: session, prompt: prompt, timeout: timeout)
+        )
         try Self.validate(output, source: selectedText, allowsExpansion: true)
         return SmartCleanupResponse(
             text: output,
@@ -196,8 +197,9 @@ actor AppleFoundationModelsPostProcessor {
             vocabulary: vocabulary
         )
         let started = ContinuousClock.now
-        let output = try await respond(session: session, prompt: prompt, timeout: timeout)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let output = Self.stripResponseFences(
+            try await respond(session: session, prompt: prompt, timeout: timeout)
+        )
         guard !output.isEmpty else { throw SmartCleanupError.emptyOutput }
         return SmartCleanupResponse(
             text: output,
@@ -319,6 +321,39 @@ actor AppleFoundationModelsPostProcessor {
         \(request.transcript)
         </transcript>
         """
+    }
+
+    /// XML-style fence tags the prompts wrap input in (e.g. <transcript>…) so
+    /// the model treats it as data, not instructions.
+    private static let responseFenceTags = [
+        "transcript", "selected_text", "command", "request", "previous_text"
+    ]
+
+    /// Small on-device models sometimes mirror the prompt's fence in their
+    /// reply, returning the cleaned text still wrapped in `<transcript>…`. Strip
+    /// any leading open tag and/or trailing close tag for the known fence names
+    /// so those delimiters never reach the pasted output.
+    static func stripResponseFences(_ text: String) -> String {
+        var result = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var changed = true
+        while changed {
+            changed = false
+            for tag in responseFenceTags {
+                let open = "<\(tag)>"
+                let close = "</\(tag)>"
+                if result.lowercased().hasPrefix(open) {
+                    result = String(result.dropFirst(open.count))
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    changed = true
+                }
+                if result.lowercased().hasSuffix(close) {
+                    result = String(result.dropLast(close.count))
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    changed = true
+                }
+            }
+        }
+        return result
     }
 
     private static func validate(_ output: String, source: String, allowsExpansion: Bool = false) throws {

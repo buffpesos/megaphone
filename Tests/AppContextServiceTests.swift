@@ -4,6 +4,7 @@ import Foundation
 struct AppContextServiceTests {
     static func main() {
         testWakeCommandIncludesPreviousTextAndScreenContext()
+        testResponseFencesAreStripped()
         TranscriptTidierTests.run()
         DictionaryStoreTests.run()
         WakePhraseMatcherTests.run()
@@ -28,6 +29,42 @@ struct AppContextServiceTests {
         expect(prompt.contains("Context: The user is composing an email reply."), "Screen context missing")
         expect(prompt.contains("Current selected text: Earlier text selected in the draft."), "Selected screen text missing")
         expect(prompt.contains("make that formal"), "Spoken follow-up missing")
+    }
+
+    private static func testResponseFencesAreStripped() {
+        let fullyWrapped = """
+        <transcript>
+        Let's ship this tomorrow.
+        </transcript>
+        """
+        expectEqual(
+            AppleFoundationModelsPostProcessor.stripResponseFences(fullyWrapped),
+            "Let's ship this tomorrow."
+        )
+
+        // Only a trailing close tag leaked.
+        expectEqual(
+            AppleFoundationModelsPostProcessor.stripResponseFences("Fix the auth bug.</transcript>"),
+            "Fix the auth bug."
+        )
+
+        // Sibling fences from the selection/command prompts.
+        expectEqual(
+            AppleFoundationModelsPostProcessor.stripResponseFences("<selected_text>Hello there</selected_text>"),
+            "Hello there"
+        )
+
+        // Text with no fence is returned unchanged (aside from trimming).
+        expectEqual(
+            AppleFoundationModelsPostProcessor.stripResponseFences("Just plain output."),
+            "Just plain output."
+        )
+
+        // A real angle bracket inside the text must survive.
+        expectEqual(
+            AppleFoundationModelsPostProcessor.stripResponseFences("Use a < b to compare."),
+            "Use a < b to compare."
+        )
     }
 
     private static func expectEqual(_ actual: String?, _ expected: String, file: StaticString = #file, line: UInt = #line) {
